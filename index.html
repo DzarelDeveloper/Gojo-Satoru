@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JJK: Gojo Satoru — Cursed Technique</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            background: #000;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        /* Fullscreen camera */
+        #camera-video {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            transform: scaleX(-1);
+            z-index: 1;
+            background: #111;
+        }
+
+        /*
+         * Three.js overlay — mix-blend-mode: screen makes black pixels
+         * transparent, so particles glow on top of camera feed.
+         * This is the KEY fix for camera visibility.
+         */
+        #three-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 3;
+            pointer-events: none;
+            mix-blend-mode: screen;
+        }
+
+        /* Dim overlay for Warp/Void (darken background) */
+        #dim-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+            opacity: 0;
+            transition: opacity 0.5s ease-out;
+            z-index: 2;
+            /* Above camera (1), Below particles (3) */
+            pointer-events: none;
+        }
+
+        /* UI */
+        #ui-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 5;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        #top-bar {
+            text-align: center;
+            padding: 28px 20px 0;
+        }
+
+        #top-bar h1 {
+            font-size: clamp(1.8rem, 5vw, 3.2rem);
+            font-weight: 900;
+            letter-spacing: 12px;
+            background: linear-gradient(180deg, #fff 0%, #667 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 20px rgba(0, 0, 0, 0.6));
+        }
+
+        #technique-name {
+            font-size: clamp(0.7rem, 2vw, 1.1rem);
+            letter-spacing: 6px;
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-top: 10px;
+            color: #00eeff;
+            text-shadow: 0 0 15px rgba(0, 238, 255, 0.6), 0 0 40px rgba(0, 238, 255, 0.2);
+            transition: color 0.5s, text-shadow 0.5s;
+        }
+
+        #bottom-bar {
+            text-align: center;
+            padding: 0 20px 24px;
+        }
+
+        #status {
+            font-size: 0.65rem;
+            letter-spacing: 3px;
+            color: rgba(255, 255, 255, 0.35);
+            text-transform: uppercase;
+        }
+
+        #vignette {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 4;
+            background: radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.5) 100%);
+        }
+
+        #grain {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 4;
+            opacity: 0.04;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+        }
+    </style>
+
+    <script type="importmap">
+        { "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }}
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+
+<body>
+
+    <video id="camera-video" autoplay playsinline muted></video>
+    <div id="three-container"></div>
+    <canvas id="debug-canvas"></canvas>
+    <div id="vignette"></div>
+    <div id="grain"></div>
+
+    <div id="ui-overlay">
+        <div id="top-bar">
+            <h1>呪術廻戦</h1>
+            <div id="technique-name">CURSED ENERGY DETECTED</div>
+        </div>
+        <div id="bottom-bar">
+            <div id="status">SAT0RU SYSTEM ACTIVE</div>
+        </div>
+    </div>
+    </div>
+    <div id="dim-overlay"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import CONFIG from './config.js';
+
+        // ============================================================
+        //  THREE.JS SETUP
+        // ============================================================
+        //  THREE.JS SETUP
+        // ============================================================
+        const threeContainer = document.getElementById('three-container');
+        const dimOverlay = document.getElementById('dim-overlay'); // Reference to overlay
+        const scene = new THREE.Scene();
+        const cam3d = new THREE.PerspectiveCamera(CONFIG.CAMERA.fov, window.innerWidth / window.innerHeight, 0.1, 1000);
+        cam3d.position.z = CONFIG.CAMERA.cameraZ;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setClearColor(0x000000, 1); // Black bg — screen blend makes it transparent
+        threeContainer.appendChild(renderer.domElement);
+
+        const composer = new EffectComposer(renderer);
+        composer.addPass(new RenderPass(scene, cam3d));
+        const bloomPass = new UnrealBloomPass(
+            new THREE.Vector2(window.innerWidth, window.innerHeight), CONFIG.BLOOM.defaultStrength, CONFIG.BLOOM.radius, CONFIG.BLOOM.threshold
+        );
+        composer.addPass(bloomPass);
+
+        // ---- Screen → World conversion ----
+        function screenToWorld(sx, sy) {
+            const fov = cam3d.fov * Math.PI / 180;
+            const halfH = cam3d.position.z * Math.tan(fov / 2);
+            const halfW = halfH * cam3d.aspect;
+            return new THREE.Vector3(
+                ((sx / window.innerWidth) - 0.5) * 2 * halfW,
+                -((sy / window.innerHeight) - 0.5) * 2 * halfH,
+                0
+            );
+        }
+
+        // ============================================================
+        //  PARTICLE SYSTEM FACTORY — creates independent ball systems
+        // ============================================================
+        const BALL_COUNT = CONFIG.BALL_COUNT;
+
+        function createBallSystem() {
+            const geo = new THREE.BufferGeometry();
+            const pos = new Float32Array(BALL_COUNT * 3);
+            const col = new Float32Array(BALL_COUNT * 3);
+            const siz = new Float32Array(BALL_COUNT);
+            const tPos = new Float32Array(BALL_COUNT * 3);
+            const tCol = new Float32Array(BALL_COUNT * 3);
+            const tSiz = new Float32Array(BALL_COUNT);
+
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+            geo.setAttribute('size', new THREE.BufferAttribute(siz, 1));
+
+            const pts = new THREE.Points(geo, new THREE.PointsMaterial({
+                size: CONFIG.PARTICLE_BASE_SIZE, vertexColors: true, blending: THREE.AdditiveBlending,
+                transparent: true, depthWrite: false
+            }));
+            pts.visible = false;
+            scene.add(pts);
+
+            return {
+                points: pts, geo,
+                pos, col, siz,
+                tPos, tCol, tSiz,
+                worldPos: new THREE.Vector3(0, 0, 0),
+                targetWorldPos: new THREE.Vector3(0, 0, 0),
+                currentShape: '',
+                visible: false,
+                opacity: 0, // 0..1 for fade in/out
+            };
+        }
+
+        const redSystem = createBallSystem();
+        const blueSystem = createBallSystem();
+        const voidSystem = createBallSystem();  // Independent void black hole
+
+        // ============================================================
+        //  PARTICLE SHAPE GENERATORS
+        // ============================================================
+        function genRed(i) {
+            const C = CONFIG.RED;
+            if (i < BALL_COUNT * C.coreRatio) {
+                const r = Math.random() * C.coreRadius;
+                const th = Math.random() * 6.28, ph = Math.acos(2 * Math.random() - 1);
+                return { x: r * Math.sin(ph) * Math.cos(th), y: r * Math.sin(ph) * Math.sin(th), z: r * Math.cos(ph), r: C.coreColor.r, g: C.coreColor.g, b: C.coreColor.b, s: C.coreSize };
+            }
+            const t = i / BALL_COUNT;
+            const angle = t * C.spiralSpeed + ((i % C.arms) * (Math.PI * 2 / C.arms));
+            const radius = C.spiralStartRadius + t * C.spiralRadius;
+            return { x: radius * Math.cos(angle), y: radius * Math.sin(angle), z: (Math.random() - 0.5) * (C.spiralDepth * t), r: C.armColor.r, g: C.armColor.g, b: C.armColor.b, s: C.armSize };
+        }
+
+        function genBlue(i) {
+            const C = CONFIG.BLUE;
+            if (i < BALL_COUNT * C.coreRatio) {
+                const r = Math.random() * C.coreRadius;
+                const th = Math.random() * 6.28, ph = Math.acos(2 * Math.random() - 1);
+                return { x: r * Math.sin(ph) * Math.cos(th), y: r * Math.sin(ph) * Math.sin(th), z: r * Math.cos(ph), r: C.coreColor.r, g: C.coreColor.g, b: C.coreColor.b, s: C.coreSize };
+            }
+            const t = i / BALL_COUNT;
+            const angle = -(t * C.spiralSpeed + ((i % C.arms) * (Math.PI * 2 / C.arms)));
+            const radius = C.spiralStartRadius + t * C.spiralRadius;
+            return { x: radius * Math.cos(angle), y: radius * Math.sin(angle), z: (Math.random() - 0.5) * (C.spiralDepth * t), r: C.armColor.r, g: C.armColor.g, b: C.armColor.b, s: C.armSize };
+        }
+
+        function genPurple(i) {
+            const C = CONFIG.PURPLE;
+            if (Math.random() > C.coreRatio) return { x: (Math.random() - 0.5) * C.outerSpread, y: (Math.random() - 0.5) * C.outerSpread, z: (Math.random() - 0.5) * C.outerSpread, r: C.outerColor.r, g: C.outerColor.g, b: C.outerColor.b, s: C.outerSize };
+            const r = C.coreRadius, th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
+            return { x: r * Math.sin(ph) * Math.cos(th), y: r * Math.sin(ph) * Math.sin(th), z: r * Math.cos(ph), r: C.coreColor.r, g: C.coreColor.g, b: C.coreColor.b, s: C.coreSize };
+        }
+
+        function genPurpleBall(i) {
+            // Reuse Red spiral logic but with Purple colors
+            const C = CONFIG.RED;
+            if (i < BALL_COUNT * C.coreRatio) {
+                const r = Math.random() * C.coreRadius;
+                const th = Math.random() * 6.28, ph = Math.acos(2 * Math.random() - 1);
+                // Core: Bright light purple
+                return {
+                    x: r * Math.sin(ph) * Math.cos(th), y: r * Math.sin(ph) * Math.sin(th), z: r * Math.cos(ph),
+                    r: 0.8, g: 0.6, b: 1.0, s: C.coreSize
+                };
+            }
+            const t = i / BALL_COUNT;
+            const angle = t * C.spiralSpeed + ((i % C.arms) * (Math.PI * 2 / C.arms));
+            const radius = C.spiralStartRadius + t * C.spiralRadius;
+            // Arms: Deep purple
+            const depth = C.spiralDepth || 10;
+            return {
+                x: radius * Math.cos(angle), y: radius * Math.sin(angle), z: (Math.random() - 0.5) * (depth * t),
+                r: 0.6, g: 0.0, b: 1.0, s: C.armSize
+            };
+        }
+
+        // ---- Warp speed particle streaks (du hành thời gian) ----
+        function genWarp(i) {
+            const C = CONFIG.VOID;
+            // Streaks bay ngang (Horizontal) - Distribution wide X, narrow Y/Z
+            const y = (Math.random() - 0.5) * 60; // Spread vertical
+            const z = (Math.random() - 0.5) * 60; // Spread depth
+            const x = (Math.random() - 0.5) * 400; // Wide X spread
+
+            // Màu: Trắng hoặc Tím
+            const isWhite = Math.random() > 0.4; // More white for stars
+            return {
+                x: x, y: y, z: z,
+                r: isWhite ? 1.0 : 0.7,
+                g: isWhite ? 1.0 : 0.0,
+                b: isWhite ? 1.0 : 1.0,
+                // Random size to simulate distance/speed
+                s: 0.5 + Math.random() * 3.0
+            };
+        }
+
+        function genVoid(i) {
+            const C = CONFIG.VOID;
+            const t = i / BALL_COUNT;
+
+            // Layer 1: Bright accretion ring (main glowing torus)
+            if (t < 0.25) {
+                const angle = Math.random() * Math.PI * 2;
+                const ringR = C.ringRadius + (Math.random() - 0.5) * 4;
+                const thickness = (Math.random() - 0.5) * 2;
+                const brightness = 1.5 + Math.random() * 1.5;
+                return {
+                    x: ringR * Math.cos(angle), y: ringR * Math.sin(angle), z: thickness,
+                    r: C.ringColor.r * brightness, g: C.ringColor.g * brightness, b: C.ringColor.b * brightness, s: C.ringSize * (0.8 + Math.random() * 0.6)
+                };
+            }
+            // Layer 2: Inner glow ring (closer to event horizon)
+            if (t < 0.40) {
+                const angle = Math.random() * Math.PI * 2;
+                const innerR = C.ringRadius * 0.6 + (Math.random() - 0.5) * 3;
+                return {
+                    x: innerR * Math.cos(angle), y: innerR * Math.sin(angle), z: (Math.random() - 0.5) * 1.5,
+                    r: 0.3, g: 0.6, b: 1.2, s: C.ringSize * 0.7
+                };
+            }
+            // Layer 3: Accretion disk (flat band, tilted look)
+            if (t < 0.60) {
+                const diskR = C.ringRadius * (0.4 + Math.random() * 0.8);
+                const angle = Math.random() * Math.PI * 2;
+                const diskTilt = 0.15; // slight tilt
+                return {
+                    x: diskR * Math.cos(angle), y: diskR * Math.sin(angle) * diskTilt, z: diskR * Math.sin(angle) * 0.3,
+                    r: 0.15, g: 0.35, b: 0.7, s: 0.6 + Math.random() * 0.4
+                };
+            }
+            // Layer 4: Orbital debris / scattered particles
+            if (t < 0.80) {
+                const orbitR = C.ringRadius + Math.random() * 30;
+                const angle = Math.random() * Math.PI * 2;
+                const spread = (Math.random() - 0.5) * 15;
+                return {
+                    x: orbitR * Math.cos(angle), y: orbitR * Math.sin(angle), z: spread,
+                    r: 0.1, g: 0.3, b: 0.6, s: 0.3 + Math.random() * 0.5
+                };
+            }
+            // Layer 5: Far scattered stars/dust
+            const farR = C.outerMinRadius + Math.random() * (C.outerMaxRadius - C.outerMinRadius);
+            const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
+            return {
+                x: farR * Math.sin(ph) * Math.cos(th), y: farR * Math.sin(ph) * Math.sin(th), z: farR * Math.cos(ph),
+                r: C.outerColor.r, g: C.outerColor.g, b: C.outerColor.b, s: C.outerSize * (0.3 + Math.random() * 0.5)
+            };
+        }
+
+        function genEmpty(i) {
+            return { x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, s: 0 };
+        }
+
+        function setShape(sys, genFn) {
+            for (let i = 0; i < BALL_COUNT; i++) {
+                const p = genFn(i);
+                sys.tPos[i * 3] = p.x; sys.tPos[i * 3 + 1] = p.y; sys.tPos[i * 3 + 2] = p.z;
+                sys.tCol[i * 3] = p.r; sys.tCol[i * 3 + 1] = p.g; sys.tCol[i * 3 + 2] = p.b;
+                sys.tSiz[i] = p.s;
+            }
+        }
+
+        // ============================================================
+        //  STATE
+        // ============================================================
+        let currentTechnique = 'neutral';
+        let purpleMode = false;
+        let purpleController = null; // 'left' or 'right' — which finger controls purple
+        let shakeIntensity = 0;
+        // Pointing fire cooldown
+        let snapCooldown = 0;
+
+        // Projectile
+        let projectileActive = false;
+        let projectileTimer = 0;
+        let projectileSystem = null; // which system is flying
+        let projectileDir = new THREE.Vector3();
+
+        // Fire charge state (3-finger charge → fire)
+        let chargeActive = false;
+        let chargeTimer = 0;
+        let chargeHand = null;  // 'left' or 'right'
+
+        // Fusion animation state (binary star orbit → collision → purple)
+        let fusionActive = false;
+        let fusionPhase = 0;       // 0=not active, 1=orbit, 2=spiral, 3=explosion
+        let fusionAngle = 0;
+        let fusionRadius = 0;
+        let fusionSpeed = 0;
+        let fusionTimer = 0;
+        let fusionCenter = new THREE.Vector3();  // midpoint of the two fingers
+
+        // Void state
+        let voidPhase = 0;   // 0=off, 1=warp speed (intro), 2=black hole (main)
+        let voidTimer = 0;
+
+        // ---- Gesture helpers ----
+        function isFingerExtended(lm, tip, pip) { return lm[tip].y < lm[pip].y; }
+        function isOnlyIndexExtended(lm) {
+            return isFingerExtended(lm, 8, 6) && !isFingerExtended(lm, 12, 10)
+                && !isFingerExtended(lm, 16, 14) && !isFingerExtended(lm, 20, 18);
+        }
+        function isCrossedFingers(lm) {
+            if (!isFingerExtended(lm, 8, 6) || !isFingerExtended(lm, 12, 10)) return false;
+            return Math.hypot(lm[8].x - lm[12].x, lm[8].y - lm[12].y) < CONFIG.DETECTION.crossedFingerThreshold;
+        }
+        function detectPointing(lm) {
+            // Bắn: dơ ngón trỏ + áp út + út (đồng thời), ngón giữa co
+            return isFingerExtended(lm, 8, 6)
+                && !isFingerExtended(lm, 12, 10)
+                && isFingerExtended(lm, 16, 14)
+                && isFingerExtended(lm, 20, 18);
+        }
+        function lmToScreen(lm) {
+            return { x: (1 - lm.x) * window.innerWidth, y: lm.y * window.innerHeight };
+        }
+
+        // ============================================================
+        //  HAND RESULTS
+        // ============================================================
+        const videoEl = document.getElementById('camera-video');
+        const techniqueNameEl = document.getElementById('technique-name');
+
+        const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: CONFIG.DETECTION.minDetectionConfidence, minTrackingConfidence: CONFIG.DETECTION.minTrackingConfidence });
+        hands.onResults(onHandResults);
+
+        function onHandResults(results) {
+            let leftIndex = null, rightIndex = null;
+            let leftCrossed = false, rightCrossed = false;
+            let leftSnap = false, rightSnap = false;
+            let crossedScreen = null;
+
+            if (results.multiHandLandmarks && results.multiHandedness) {
+                for (let h = 0; h < results.multiHandLandmarks.length; h++) {
+                    const lm = results.multiHandLandmarks[h];
+                    const label = results.multiHandedness[h].label;
+                    const isLeft = label === 'Right';  // MP mirrored
+                    const isRight = label === 'Left';
+
+                    if (isCrossedFingers(lm)) {
+                        if (isLeft) leftCrossed = true;
+                        if (isRight) rightCrossed = true;
+                        crossedScreen = lmToScreen(lm[9]);
+                    } else if (detectPointing(lm)) {
+                        // 3 ngón (trỏ+áp út+út) = charge để bắn
+                        const middleTip = lmToScreen(lm[12]);
+                        if (isLeft) { leftSnap = true; leftIndex = middleTip; }
+                        if (isRight) { rightSnap = true; rightIndex = middleTip; }
+                    } else if (isOnlyIndexExtended(lm)) {
+                        const tip = lmToScreen(lm[8]);
+                        if (isLeft) leftIndex = tip;
+                        if (isRight) rightIndex = tip;
+                    }
+                }
+            }
+
+            // ===== DEBUG: Draw hand landmarks =====
+            if (CONFIG.DEBUG && CONFIG.DEBUG.showLandmarks) {
+                const canvas = document.getElementById('debug-canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                canvas.style.position = 'fixed';
+                canvas.style.top = '0';
+                canvas.style.left = '0';
+                canvas.style.width = '100%';
+                canvas.style.height = '100%';
+                canvas.style.pointerEvents = 'none';
+                canvas.style.zIndex = '10';
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // MediaPipe hand connections
+                const CONNECTIONS = [
+                    [0, 1], [1, 2], [2, 3], [3, 4],       // thumb
+                    [0, 5], [5, 6], [6, 7], [7, 8],       // index
+                    [0, 9], [9, 10], [10, 11], [11, 12],  // middle
+                    [0, 13], [13, 14], [14, 15], [15, 16],// ring
+                    [0, 17], [17, 18], [18, 19], [19, 20], // pinky
+                    [5, 9], [9, 13], [13, 17],           // palm
+                ];
+
+                if (results.multiHandLandmarks && results.multiHandedness) {
+                    for (let h = 0; h < results.multiHandLandmarks.length; h++) {
+                        const lm = results.multiHandLandmarks[h];
+                        const label = results.multiHandedness[h].label;
+                        const isLeft = label === 'Right'; // MP mirrored
+                        const labelText = isLeft ? 'LEFT' : 'RIGHT';
+
+                        // Dynamic color based on active technique
+                        let color;
+                        if (currentTechnique === 'void') {
+                            color = '#00eeff'; // Cyan for Void
+                        } else if (currentTechnique === 'purple' || purpleMode || currentTechnique === 'fusing') {
+                            color = '#bb44ff'; // Purple when fused/fusing
+                        } else if (isLeft) {
+                            color = '#ff3333'; // Red for left hand
+                        } else {
+                            color = '#4488ff'; // Blue for right hand
+                        }
+
+                        // Draw connections (colored to match technique)
+                        ctx.strokeStyle = color + '88'; // Semi-transparent technique color
+                        ctx.lineWidth = 2;
+                        for (const [a, b] of CONNECTIONS) {
+                            const ax = (1 - lm[a].x) * canvas.width;
+                            const ay = lm[a].y * canvas.height;
+                            const bx = (1 - lm[b].x) * canvas.width;
+                            const by = lm[b].y * canvas.height;
+                            ctx.beginPath();
+                            ctx.moveTo(ax, ay);
+                            ctx.lineTo(bx, by);
+                            ctx.stroke();
+                        }
+
+                        // Draw landmarks
+                        for (let i = 0; i < lm.length; i++) {
+                            const x = (1 - lm[i].x) * canvas.width;
+                            const y = lm[i].y * canvas.height;
+                            const isKey = [4, 8, 12, 16, 20].includes(i); // fingertips
+                            ctx.beginPath();
+                            ctx.arc(x, y, isKey ? 6 : 3, 0, Math.PI * 2);
+                            ctx.fillStyle = isKey ? color : (color + 'CC'); // Key=full, others=80%
+                            ctx.fill();
+                        }
+
+                        // Hand label
+                        const wristX = (1 - lm[0].x) * canvas.width;
+                        const wristY = lm[0].y * canvas.height;
+                        ctx.fillStyle = color;
+                        ctx.font = 'bold 14px monospace';
+                        ctx.fillText(labelText, wristX - 20, wristY + 25);
+                    }
+                }
+            }
+
+            const prevTech = currentTechnique;
+
+            // ═══════════════════════════════════════════════
+            //  PRIORITY 1: Unlimited Void (crossed fingers)
+            // ═══════════════════════════════════════════════
+
+            // Phase 1 (Warp Intro) -> KHÔNG THỂ NGẮT (Force Active)
+            if (voidPhase === 1) {
+                currentTechnique = 'void';
+                redSystem.visible = false; blueSystem.visible = false;
+            }
+
+            // Trigger & Maintain
+            if ((leftCrossed || rightCrossed || voidPhase === 1) && !projectileActive) {
+                currentTechnique = 'void';
+                purpleMode = false;
+                if (fusionActive) { fusionActive = false; fusionPhase = 0; }
+
+                // Start Warp Phase if fresh start
+                if (voidPhase === 0) {
+                    voidPhase = 1;
+                    voidTimer = 0;
+                    setShape(voidSystem, genWarp);
+                    voidSystem.currentShape = 'warp';
+                    voidSystem.targetWorldPos.set(0, 0, 0); // Warp full screen centered
+                    voidSystem.worldPos.set(0, 0, 0);
+                }
+
+                if (voidPhase === 2) {
+                    // Void system — independent, fixed at center
+                    if (voidSystem.currentShape !== 'void') { setShape(voidSystem, genVoid); voidSystem.currentShape = 'void'; }
+                    voidSystem.targetWorldPos.set(CONFIG.VOID.posX, CONFIG.VOID.posY, CONFIG.VOID.posZ);
+                    // Lerp position slightly for smoothness
+                    voidSystem.worldPos.x += (CONFIG.VOID.posX - voidSystem.worldPos.x) * 0.1;
+                    voidSystem.worldPos.y += (CONFIG.VOID.posY - voidSystem.worldPos.y) * 0.1;
+                    voidSystem.worldPos.z += (CONFIG.VOID.posZ - voidSystem.worldPos.z) * 0.1;
+                }
+
+                voidSystem.visible = true; voidSystem.opacity = 1;
+
+                // Hide red/blue during void
+                redSystem.visible = false; redSystem.opacity = 0;
+                blueSystem.visible = false; blueSystem.opacity = 0;
+
+                if (voidPhase === 1) {
+                    shakeIntensity = CONFIG.VOID.warpShake;
+                    bloomPass.strength = CONFIG.VOID.warpBloom;
+                } else {
+                    shakeIntensity = CONFIG.VOID.shake;
+                    bloomPass.strength = CONFIG.VOID.bloom;
+                }
+            }
+            // ═══════════════════════════════════════════════
+            //  PRIORITY 2: 3-Finger Charge → Projectile
+            // ═══════════════════════════════════════════════
+            else if ((leftSnap || rightSnap) && !projectileActive) {
+                // Bắt đầu charge hoặc tiếp tục charge
+                if (!chargeActive) {
+                    chargeActive = true;
+                    chargeTimer = 0;
+                    chargeHand = leftSnap ? 'left' : 'right';
+                    currentTechnique = chargeHand === 'left' ? 'red' : 'blue';
+                    updateUI(currentTechnique);
+                }
+                chargeTimer++;
+
+                // Quả cầu di theo ngón giữa trong lúc charge
+                if (chargeHand === 'left' && leftIndex) {
+                    const wp = screenToWorld(leftIndex.x, leftIndex.y);
+                    redSystem.targetWorldPos.copy(wp);
+                    redSystem.visible = true; redSystem.opacity = 1;
+
+                    // Nếu đang Purple Mode -> dùng genPurpleBall
+                    const targetShape = purpleMode ? 'purpleBall' : 'red';
+                    const genFunc = purpleMode ? genPurpleBall : genRed;
+                    if (redSystem.currentShape !== targetShape) { setShape(redSystem, genFunc); redSystem.currentShape = targetShape; }
+
+                    // Ẩn system tay kia (nếu đang purple mode hoặc muốn clean)
+                    if (purpleMode) { blueSystem.visible = false; blueSystem.opacity = 0; }
+                }
+                if (chargeHand === 'right' && rightIndex) {
+                    const wp = screenToWorld(rightIndex.x, rightIndex.y);
+                    blueSystem.targetWorldPos.copy(wp);
+                    blueSystem.visible = true; blueSystem.opacity = 1;
+
+                    // Nếu đang Purple Mode -> dùng genPurpleBall
+                    const targetShape = purpleMode ? 'purpleBall' : 'blue';
+                    const genFunc = purpleMode ? genPurpleBall : genBlue;
+                    if (blueSystem.currentShape !== targetShape) { setShape(blueSystem, genFunc); blueSystem.currentShape = targetShape; }
+
+                    // Ẩn system tay kia
+                    if (purpleMode) { redSystem.visible = false; redSystem.opacity = 0; }
+                }
+
+                // Tăng bloom khi charge
+                bloomPass.strength = CONFIG.ANIMATION.neutralBloom + (chargeTimer / CONFIG.DETECTION.chargeFrames) * 3;
+                shakeIntensity = (chargeTimer / CONFIG.DETECTION.chargeFrames) * 2;
+
+                // Đủ charge → Bắn về phía người xem!
+                if (chargeTimer >= CONFIG.DETECTION.chargeFrames) {
+                    projectileActive = true; projectileTimer = 0;
+                    if (chargeHand === 'left') {
+                        // Use config direction
+                        const d = CONFIG.PROJECTILE.redDirection;
+                        projectileDir.set(d.x, d.y, d.z).normalize();
+                        projectileSystem = 'red';
+                    } else {
+                        const d = CONFIG.PROJECTILE.blueDirection;
+                        projectileDir.set(d.x, d.y, d.z).normalize();
+                        projectileSystem = 'blue';
+                    }
+                    if (purpleMode) {
+                        // Purple tự detect hướng dựa trên tay bắn
+                        const d = (chargeHand === 'left')
+                            ? CONFIG.PROJECTILE.redDirection
+                            : CONFIG.PROJECTILE.blueDirection;
+                        projectileDir.set(d.x, d.y, d.z).normalize();
+
+                        // CHỈ bắn system tương ứng (không bắn cả 2)
+                        projectileSystem = chargeHand === 'left' ? 'red' : 'blue';
+
+                        // Ẩn system còn lại (tránh để lại bóng ma)
+                        if (chargeHand === 'left') {
+                            blueSystem.visible = false; blueSystem.opacity = 0;
+                        } else {
+                            redSystem.visible = false; redSystem.opacity = 0;
+                        }
+
+                        purpleMode = false;
+                    }
+                    chargeActive = false;
+                    chargeTimer = 0;
+                    snapCooldown = CONFIG.DETECTION.snapCooldownFrames;
+                }
+            }
+            // Reset charge nếu bỏ gesture
+            else if (chargeActive && !leftSnap && !rightSnap) {
+                chargeActive = false;
+                chargeTimer = 0;
+                shakeIntensity = 0;
+            }
+            // ═══════════════════════════════════════════════
+            //  PRIORITY 3: Normal — independent red/blue + fusion
+            // ═══════════════════════════════════════════════
+            else if (!projectileActive) {
+
+                // --- FUSION IN PROGRESS (animation running) ---
+                if (fusionActive) {
+                    // Update center point from finger positions if available
+                    if (leftIndex && rightIndex) {
+                        const mx = (leftIndex.x + rightIndex.x) / 2;
+                        const my = (leftIndex.y + rightIndex.y) / 2;
+                        fusionCenter.copy(screenToWorld(mx, my));
+                    } else if (leftIndex) {
+                        fusionCenter.copy(screenToWorld(leftIndex.x, leftIndex.y));
+                    } else if (rightIndex) {
+                        fusionCenter.copy(screenToWorld(rightIndex.x, rightIndex.y));
+                    }
+                    // If both fingers lost during fusion → cancel
+                    if (!leftIndex && !rightIndex && fusionPhase < 3) {
+                        fusionActive = false;
+                        fusionPhase = 0;
+                        currentTechnique = 'neutral';
+                    }
+                    // Don't change currentTechnique — animate() handles everything
+                }
+                // --- PURPLE MODE (already fused) ---
+                else if (purpleMode) {
+                    if (leftIndex || rightIndex) {
+                        const ctrl = leftIndex || rightIndex;
+                        const wp = screenToWorld(ctrl.x, ctrl.y);
+                        redSystem.targetWorldPos.copy(wp);
+                        blueSystem.targetWorldPos.copy(wp);
+                        redSystem.visible = true; redSystem.opacity = 1;
+                        blueSystem.visible = true; blueSystem.opacity = 1;
+                        currentTechnique = 'purple';
+                    } else {
+                        purpleMode = false;
+                        redSystem.visible = false;
+                        blueSystem.visible = false;
+                        currentTechnique = 'neutral';
+                    }
+                }
+                // --- NORMAL: check for new fusion trigger ---
+                else {
+                    const bothActive = leftIndex && rightIndex;
+                    if (bothActive) {
+                        const dist = Math.hypot(leftIndex.x - rightIndex.x, leftIndex.y - rightIndex.y);
+                        const FUSE_DIST = CONFIG.PURPLE.fusionDistance;
+                        if (dist < FUSE_DIST && !fusionActive) {
+                            // START FUSION ANIMATION!
+                            fusionActive = true;
+                            fusionPhase = 1;  // orbit phase
+                            fusionAngle = 0;
+                            fusionRadius = CONFIG.FUSION.orbitStartRadius;
+                            fusionSpeed = CONFIG.FUSION.orbitSpeed;
+                            fusionTimer = 0;
+                            const mx = (leftIndex.x + rightIndex.x) / 2;
+                            const my = (leftIndex.y + rightIndex.y) / 2;
+                            fusionCenter.copy(screenToWorld(mx, my));
+                            // Ensure both systems are visible with their original colors
+                            redSystem.visible = true; redSystem.opacity = 1;
+                            blueSystem.visible = true; blueSystem.opacity = 1;
+                            currentTechnique = 'fusing';
+                            bloomPass.strength = CONFIG.FUSION.orbitBloom;
+                            shakeIntensity = CONFIG.FUSION.orbitShake;
+                        } else if (dist >= FUSE_DIST) {
+                            handleIndependent(leftIndex, rightIndex);
+                        } else {
+                            handleIndependent(leftIndex, rightIndex);
+                        }
+                    } else {
+                        handleIndependent(leftIndex, rightIndex);
+                    }
+                }
+            }
+
+            // Hide voidSystem when leaving void mode
+            if (currentTechnique !== 'void' && voidSystem.visible) {
+                voidSystem.opacity -= CONFIG.ANIMATION.fadeOutSpeed;
+                if (voidSystem.opacity <= 0) {
+                    voidSystem.visible = false;
+                    voidSystem.opacity = 0;
+                    voidSystem.currentShape = '';
+                    voidPhase = 0; // Reset phase
+                    voidTimer = 0;
+                }
+                // Reset red/blue shapes so they re-morph on next detection
+                redSystem.currentShape = '';
+                blueSystem.currentShape = '';
+            }
+
+            if (currentTechnique !== prevTech) updateUI(currentTechnique);
+            if (snapCooldown > 0) snapCooldown--;
+        }
+
+        function handleIndependent(leftIndex, rightIndex) {
+            // RED (left hand)
+            if (leftIndex) {
+                if (redSystem.currentShape !== 'red') { setShape(redSystem, genRed); redSystem.currentShape = 'red'; }
+                redSystem.targetWorldPos.copy(screenToWorld(leftIndex.x, leftIndex.y));
+                redSystem.visible = true;
+                redSystem.opacity = Math.min(1, redSystem.opacity + CONFIG.ANIMATION.fadeInSpeed);
+            } else {
+                redSystem.opacity -= CONFIG.ANIMATION.fadeOutSpeed;
+                if (redSystem.opacity <= 0) { redSystem.visible = false; redSystem.opacity = 0; }
+            }
+
+            // BLUE (right hand)
+            if (rightIndex) {
+                if (blueSystem.currentShape !== 'blue') { setShape(blueSystem, genBlue); blueSystem.currentShape = 'blue'; }
+                blueSystem.targetWorldPos.copy(screenToWorld(rightIndex.x, rightIndex.y));
+                blueSystem.visible = true;
+                blueSystem.opacity = Math.min(1, blueSystem.opacity + CONFIG.ANIMATION.fadeInSpeed);
+            } else {
+                blueSystem.opacity -= CONFIG.ANIMATION.fadeOutSpeed;
+                if (blueSystem.opacity <= 0) { blueSystem.visible = false; blueSystem.opacity = 0; }
+            }
+
+            // Determine technique for UI
+            if (redSystem.visible && blueSystem.visible) currentTechnique = 'both';
+            else if (redSystem.visible) currentTechnique = 'red';
+            else if (blueSystem.visible) currentTechnique = 'blue';
+            else currentTechnique = 'neutral';
+
+            // Bloom/shake per state
+            const bloom = { neutral: CONFIG.BLOOM.defaultStrength, red: CONFIG.RED.bloom, blue: CONFIG.BLUE.bloom, both: 2.0, purple: CONFIG.PURPLE.bloom, void: CONFIG.VOID.bloom };
+            const shake = { neutral: 0, red: CONFIG.RED.shake, blue: CONFIG.BLUE.shake, both: 0.2, purple: CONFIG.PURPLE.shake, void: CONFIG.VOID.shake };
+            bloomPass.strength = bloom[currentTechnique] ?? CONFIG.BLOOM.defaultStrength;
+            shakeIntensity = shake[currentTechnique] ?? 0;
+        }
+
+        function updateUI(tech) {
+            const map = {
+                neutral: { text: 'CURSED ENERGY DETECTED', color: '#00eeff' },
+                red: { text: '赫 — CURSED TECHNIQUE REVERSAL: RED', color: '#ff3333' },
+                blue: { text: '蒼 — CURSED TECHNIQUE Lapse: BLUE', color: '#3388ff' },
+                both: { text: '術式展開 — DUAL CURSED ENERGY', color: '#aa66ff' },
+                fusing: { text: '虚式 — MERGING CURSED ENERGY...', color: '#ff66ff' },
+                purple: { text: '茈 — HOLLOW TECHNIQUE: PURPLE', color: '#bb44ff' },
+                void: { text: '無量空処 — DOMAIN EXPANSION: INFINITE VOID', color: '#00eeff' },
+            };
+            const info = map[tech] || map.neutral;
+            techniqueNameEl.textContent = info.text;
+            techniqueNameEl.style.color = info.color;
+            techniqueNameEl.style.textShadow = `0 0 15px ${info.color}80, 0 0 40px ${info.color}30`;
+        }
+
+        // ============================================================
+        //  ANIMATION LOOP
+        // ============================================================
+        function updateSystem(sys, dt) {
+            sys.points.visible = sys.visible;
+            if (!sys.visible && sys.opacity <= 0) return;
+
+            // Lerp position
+            sys.worldPos.lerp(sys.targetWorldPos, CONFIG.ANIMATION.positionLerpSpeed);
+            sys.points.position.copy(sys.worldPos);
+
+            // Lerp particles
+            const pos = sys.pos, col = sys.col, siz = sys.siz;
+            const tP = sys.tPos, tC = sys.tCol, tS = sys.tSiz;
+            const fadeMultiplier = Math.max(0, sys.opacity);
+
+            for (let i = 0; i < BALL_COUNT * 3; i++) {
+                pos[i] += (tP[i] - pos[i]) * CONFIG.ANIMATION.morphLerpSpeed;
+                col[i] += (tC[i] * fadeMultiplier - col[i]) * CONFIG.ANIMATION.morphLerpSpeed;
+            }
+            for (let i = 0; i < BALL_COUNT; i++) {
+                siz[i] += (tS[i] * fadeMultiplier - siz[i]) * CONFIG.ANIMATION.morphLerpSpeed;
+            }
+
+            sys.geo.attributes.position.needsUpdate = true;
+            sys.geo.attributes.color.needsUpdate = true;
+            sys.geo.attributes.size.needsUpdate = true;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // ═══════════════════════════════════════════════
+            //  FUSION ANIMATION (binary star orbit → collision → purple)
+            // ═══════════════════════════════════════════════
+            if (fusionActive) {
+                const FC = CONFIG.FUSION;
+
+                if (fusionPhase === 1 || fusionPhase === 2) {
+                    // Phase 1 → 2: orbit + spiral inward
+                    fusionAngle += fusionSpeed;
+                    fusionSpeed *= FC.spiralSpeedUp;   // Speed up rotation
+                    fusionRadius *= FC.spiralShrinkRate; // Shrink orbit
+
+                    // After a few loops, switch to phase 2 (visual only, same physics)
+                    if (fusionPhase === 1 && fusionRadius < FC.orbitStartRadius * 0.7) {
+                        fusionPhase = 2;
+                        // Increase bloom & shake as they merge
+                        bloomPass.strength = FC.orbitBloom + 1.5;
+                        shakeIntensity = FC.orbitShake + 0.3;
+                    }
+
+                    // Position both systems on opposite sides of the orbit
+                    const rx = fusionCenter.x + Math.cos(fusionAngle) * fusionRadius;
+                    const ry = fusionCenter.y + Math.sin(fusionAngle) * fusionRadius;
+                    const bx = fusionCenter.x + Math.cos(fusionAngle + Math.PI) * fusionRadius;
+                    const by = fusionCenter.y + Math.sin(fusionAngle + Math.PI) * fusionRadius;
+
+                    redSystem.worldPos.set(rx, ry, 0);
+                    redSystem.targetWorldPos.set(rx, ry, 0);
+                    redSystem.points.position.set(rx, ry, 0);
+
+                    blueSystem.worldPos.set(bx, by, 0);
+                    blueSystem.targetWorldPos.set(bx, by, 0);
+                    blueSystem.points.position.set(bx, by, 0);
+
+                    // Speed up rotation of the individual particles during orbit
+                    redSystem.points.rotation.z -= 0.15;
+                    blueSystem.points.rotation.z += 0.15;
+
+                    // COLLISION check — orbit radius small enough
+                    if (fusionRadius < FC.collisionRadius) {
+                        fusionPhase = 3;
+                        fusionTimer = 0;
+                        // Explosion! Scatter particles then reform
+                        bloomPass.strength = FC.explosionBloom;
+                        shakeIntensity = FC.explosionShake;
+                        // Morph to purple shape
+                        setShape(redSystem, genPurple); redSystem.currentShape = 'purple';
+                        setShape(blueSystem, genPurple); blueSystem.currentShape = 'purple';
+                        // Scatter current positions outward for explosion
+                        for (let i = 0; i < BALL_COUNT * 3; i++) {
+                            redSystem.pos[i] += (Math.random() - 0.5) * FC.explosionScatter;
+                            blueSystem.pos[i] += (Math.random() - 0.5) * FC.explosionScatter;
+                        }
+                        redSystem.geo.attributes.position.needsUpdate = true;
+                        blueSystem.geo.attributes.position.needsUpdate = true;
+                        // Move both to center
+                        redSystem.worldPos.copy(fusionCenter);
+                        blueSystem.worldPos.copy(fusionCenter);
+                        redSystem.targetWorldPos.copy(fusionCenter);
+                        blueSystem.targetWorldPos.copy(fusionCenter);
+                        redSystem.points.position.copy(fusionCenter);
+                        blueSystem.points.position.copy(fusionCenter);
+                        currentTechnique = 'fusing';
+                        updateUI('fusing');
+                    }
+
+                } else if (fusionPhase === 3) {
+                    // Phase 3: Explosion reform
+                    fusionTimer++;
+                    // Particles morph back toward purple shape (handled by updateSystem)
+                    // Gradually reduce bloom & shake
+                    const progress = fusionTimer / FC.explosionDuration;
+                    bloomPass.strength = FC.explosionBloom + (CONFIG.PURPLE.bloom - FC.explosionBloom) * progress;
+                    shakeIntensity = FC.explosionShake * (1 - progress);
+
+                    // Keep at center
+                    redSystem.targetWorldPos.copy(fusionCenter);
+                    blueSystem.targetWorldPos.copy(fusionCenter);
+
+                    if (fusionTimer >= FC.explosionDuration) {
+                        // Fusion complete → enter purple mode
+                        fusionActive = false;
+                        fusionPhase = 0;
+                        purpleMode = true;
+                        currentTechnique = 'purple';
+                        updateUI('purple');
+                        bloomPass.strength = CONFIG.PURPLE.bloom;
+                        shakeIntensity = CONFIG.PURPLE.shake;
+                    }
+                }
+            }
+
+            // Projectile logic: bay về phía người xem + to dần
+            if (projectileActive) {
+                projectileTimer++;
+                const progress = projectileTimer / CONFIG.PROJECTILE.duration;
+                const speed = CONFIG.PROJECTILE.speed * (1 + progress * 3); // tăng tốc dần
+
+                if (projectileSystem === 'red' || projectileSystem === 'both') {
+                    redSystem.worldPos.add(projectileDir.clone().multiplyScalar(speed));
+                    redSystem.points.position.copy(redSystem.worldPos);
+                    // Quả cầu to dần
+                    const s = 1 + progress * 4;
+                    redSystem.points.scale.set(s, s, s);
+                }
+                if (projectileSystem === 'blue' || projectileSystem === 'both') {
+                    blueSystem.worldPos.add(projectileDir.clone().multiplyScalar(speed));
+                    blueSystem.points.position.copy(blueSystem.worldPos);
+                    const s = 1 + progress * 4;
+                    blueSystem.points.scale.set(s, s, s);
+                }
+
+                // Bloom tăng mạnh khi bay
+                bloomPass.strength = CONFIG.BLOOM.defaultStrength + progress * 6;
+                shakeIntensity = progress * 3;
+
+                // Kill projectile if duration ends OR if it passes behind camera (Z > 55)
+                // Camera Z is 55 (CONFIG.CAMERA.cameraZ)
+                const isRedDone = (projectileSystem === 'red' || projectileSystem === 'both') && redSystem.worldPos.z > CONFIG.CAMERA.cameraZ + 20;
+                const isBlueDone = (projectileSystem === 'blue' || projectileSystem === 'both') && blueSystem.worldPos.z > CONFIG.CAMERA.cameraZ + 20;
+
+                if (projectileTimer > CONFIG.PROJECTILE.duration || isRedDone || isBlueDone) {
+                    projectileActive = false;
+                    if (projectileSystem === 'red' || projectileSystem === 'both') {
+                        redSystem.visible = false; redSystem.opacity = 0;
+                        redSystem.worldPos.set(0, 0, 0); redSystem.targetWorldPos.set(0, 0, 0);
+                        redSystem.currentShape = '';
+                        redSystem.points.scale.set(1, 1, 1);  // Reset scale
+                    }
+                    if (projectileSystem === 'blue' || projectileSystem === 'both') {
+                        blueSystem.visible = false; blueSystem.opacity = 0;
+                        blueSystem.worldPos.set(0, 0, 0); blueSystem.targetWorldPos.set(0, 0, 0);
+                        blueSystem.currentShape = '';
+                        blueSystem.points.scale.set(1, 1, 1);  // Reset scale
+                    }
+                    currentTechnique = 'neutral';
+                    updateUI('neutral');
+                    bloomPass.strength = CONFIG.BLOOM.defaultStrength;
+                    shakeIntensity = 0;
+                }
+            }
+
+            // Update all systems
+            updateSystem(redSystem);
+            updateSystem(blueSystem);
+            updateSystem(voidSystem);
+
+            // Void handling (Warp Animation)
+            if (currentTechnique === 'void') {
+                if (voidPhase === 1) {
+                    voidTimer++;
+                    // Animate WARP: Particles fly horizontally fast
+                    const positions = voidSystem.points.geometry.attributes.position.array;
+                    for (let i = 0; i < BALL_COUNT; i++) {
+                        let x = positions[i * 3];
+                        // Move RIGHT very fast
+                        x += CONFIG.VOID.warpSpeed;
+                        // Wrap around screen
+                        if (x > 100) x -= 200;
+                        positions[i * 3] = x;
+                    }
+                    voidSystem.points.geometry.attributes.position.needsUpdate = true;
+
+                    // Transition to Phase 2 (Black Hole)
+                    if (voidTimer > CONFIG.VOID.warpDuration) {
+                        voidPhase = 2;
+                        voidTimer = 0;
+                        setShape(voidSystem, genVoid);
+                        voidSystem.currentShape = 'void';
+                    }
+                } else {
+                    // Normal Black Hole Rotation
+                    voidSystem.points.rotation.z += CONFIG.VOID.rotationZ;
+                    voidSystem.points.rotation.x += CONFIG.VOID.rotationX;
+                }
+
+                // Dim background during Void (Warp or Black Hole)
+                dimOverlay.style.opacity = 0.8;
+            } else {
+                // Fade out dim overlay if not void
+                dimOverlay.style.opacity = 0;
+            }
+
+            // Rotation per technique
+            const rRot = fusionActive ? -0.15 : (currentTechnique === 'red' || currentTechnique === 'both' ? CONFIG.RED.rotationSpeed : (currentTechnique === 'purple' ? CONFIG.PURPLE.rotationSpeedA : (currentTechnique === 'void' ? 0.003 : CONFIG.ANIMATION.neutralRotation)));
+            const bRot = fusionActive ? 0.15 : (currentTechnique === 'blue' || currentTechnique === 'both' ? CONFIG.BLUE.rotationSpeed : (currentTechnique === 'purple' ? CONFIG.PURPLE.rotationSpeedB : (currentTechnique === 'void' ? -0.003 : -CONFIG.ANIMATION.neutralRotation)));
+            redSystem.points.rotation.z += rRot;
+            blueSystem.points.rotation.z += bRot;
+            if (currentTechnique === 'purple') {
+                redSystem.points.rotation.y += CONFIG.PURPLE.rotationY;
+                blueSystem.points.rotation.y -= CONFIG.PURPLE.rotationY;
+            }
+
+            // Screen shake
+            if (shakeIntensity > 0) {
+                const s = shakeIntensity * CONFIG.ANIMATION.shakeMultiplier;
+                threeContainer.style.transform = `translate(${(Math.random() - 0.5) * s}px, ${(Math.random() - 0.5) * s}px)`;
+            } else {
+                threeContainer.style.transform = '';
+            }
+
+            composer.render();
+        }
+        animate();
+
+        // ============================================================
+        //  CAMERA START
+        // ============================================================
+        // Try MediaPipe Camera utility first, fallback to raw getUserMedia
+        function startCamera() {
+            try {
+                const mpCam = new Camera(videoEl, {
+                    onFrame: async () => { await hands.send({ image: videoEl }); },
+                    width: CONFIG.CAMERA.width, height: CONFIG.CAMERA.height
+                });
+                mpCam.start();
+            } catch (e) {
+                console.warn('MediaPipe Camera failed, using fallback:', e);
+                fallbackCamera();
+            }
+        }
+
+        function fallbackCamera() {
+            navigator.mediaDevices.getUserMedia({
+                video: { width: { ideal: CONFIG.CAMERA.width }, height: { ideal: CONFIG.CAMERA.height }, facingMode: 'user' }
+            }).then(stream => {
+                videoEl.srcObject = stream;
+                videoEl.play();
+                function loop() {
+                    if (videoEl.readyState >= 2) {
+                        hands.send({ image: videoEl }).then(() => requestAnimationFrame(loop));
+                    } else {
+                        requestAnimationFrame(loop);
+                    }
+                }
+                videoEl.addEventListener('loadeddata', loop);
+            }).catch(err => console.error('Camera error:', err));
+        }
+
+        startCamera();
+
+        // ---- Resize ----
+        window.addEventListener('resize', () => {
+            cam3d.aspect = window.innerWidth / window.innerHeight;
+            cam3d.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+
+</html>
