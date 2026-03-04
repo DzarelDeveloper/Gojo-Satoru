@@ -5,6 +5,10 @@
 **SAT0RU SYSTEM** — Bringing the Limitless into reality.  
 Interactive WebAR experience powered by **Three.js** and **MediaPipe**.
 
+</div>
+
+---
+
 ## ✨ Features & Techniques
 
 Using advanced particle systems and post-processing (Bloom, Shake), the system visualizes:
