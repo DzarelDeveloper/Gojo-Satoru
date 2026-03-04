@@ -2,6 +2,8 @@
 
 # 🤞 Jujutsu Kaisen: Gojo Satoru — Cursed Technique Visualizer
 
+![Gojo Satoru Banner](gojo.png)
+
 **SAT0RU SYSTEM** — Bringing the Limitless into reality.  
 Interactive WebAR experience powered by **Three.js** and **MediaPipe**.
 
